@@ -1,0 +1,15 @@
+# Python environment and caches
+   __pycache__/
+   *.pyc
+   .pytest_cache/
+   .venv/
+   venv/
+   env/
+
+   # Local database and keys (Security!)
+   *.db
+   *.enc
+   
+   # OS specific files
+   .DS_Store
+   Thumbs.db
