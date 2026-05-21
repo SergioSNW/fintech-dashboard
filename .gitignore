@@ -5,6 +5,7 @@
    .venv/
    venv/
    env/
+   
 
    # Local database and keys (Security!)
    *.db
@@ -13,3 +14,4 @@
    # OS specific files
    .DS_Store
    Thumbs.db
+notes.md

@@ -1,5 +1,5 @@
 # docker-compose.yml
-version: '3.8'
+#version: '3.8'
 
 services:
   fintech-dashboard:
@@ -9,3 +9,4 @@ services:
     environment:
       - SECRET_KEY=your_secret_key_here
       - DATABASE_URI=sqlite:///fintech_dashboard.db
+      #- DATABASE_URI=mysql+pymysql://user:password@db/dbname
