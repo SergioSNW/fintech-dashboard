@@ -2,11 +2,16 @@
 #version: '3.8'
 
 services:
-  fintech-dashboard:
-    build: .
+  fintech-dashboard-backend:
+    build: ./app
     ports:
       - "5000:5000"
     environment:
       - SECRET_KEY=your_secret_key_here
-      - DATABASE_URI=sqlite:///fintech_dashboard.db
-      #- DATABASE_URI=mysql+pymysql://user:password@db/dbname
+      - DATABASE_URI=mysql+pymysql://user:password@db/dbname
+      - API_KEY=your_api_key_here
+
+  fintech-dashboard-frontend:
+    build: ./app/ui
+    ports:
+      - "8000:8000"

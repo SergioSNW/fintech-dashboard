@@ -1,13 +1,12 @@
-from app.data import repository
-from flask import Flask, jsonify, request
-from app.service.dashboard_service import DashboardService
-from app.data.repository import DashboardRepository
+from flask import Flask, jsonify
+from dotenv import load_dotenv
+import os
+from flask_cors import CORS
 
 app = Flask(__name__)
-repository = DashboardRepository()
-service = DashboardService(repository)
+load_dotenv()
+CORS(app)
 
-@app.route('/dashboard', methods=['GET'])
-def get_dashboard():
-    data = service.get_dashboard_data()
-    return jsonify([{'id': item.id, 'name': item.name, 'value': item.value} for item in data])
+@app.route('/')
+def hello_world():
+    return 'Hello, World!'

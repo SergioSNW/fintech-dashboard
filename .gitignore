@@ -15,3 +15,12 @@
    .DS_Store
    Thumbs.db
 notes.md
+.env
+.env.example
+venv/
+__pycache__/
+*.pyc
+*.db
+*.enc
+.DS_Store
+Thumbs.db

@@ -1,0 +1,21 @@
+from setuptools import setup, find_packages
+
+setup(
+    name='fintech-dashboard',
+    version='1.0.0',
+    packages=find_packages(),
+    install_requires=[
+        'PySide6==6.4.3',
+        'pandas==1.5.2',
+        'python-dotenv==0.21.2',
+        'requests==2.28.2',
+        'aiohttp==3.7.4',
+        'pytest==7.2.2',
+        'pytest-mock==3.10.0'
+    ],
+    entry_points={
+        'console_scripts': [
+            'fintech-dashboard=app.api:main'
+        ]
+    }
+)
