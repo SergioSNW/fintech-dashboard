@@ -14,8 +14,25 @@ class FetchMarketDataUseCase:
             mapping = {
                 "btc": "bitcoin",
                 "btc_usd": "bitcoin",
+                "bitcoin": "bitcoin",
                 "eth": "ethereum",
                 "ethereum": "ethereum",
+                "sol": "solana",
+                "solana": "solana",
+                "ada": "cardano",
+                "cardano": "cardano",
+                "dot": "polkadot",
+                "polkadot": "polkadot",
+                "xrp": "ripple",
+                "ripple": "ripple",
+                "link": "chainlink",
+                "chainlink": "chainlink",
+                "doge": "dogecoin",
+                "dogecoin": "dogecoin",
+                "avax": "avalanche-2",
+                "avalanche": "avalanche-2",
+                "matic": "polygon",
+                "polygon": "polygon",
             }
             return mapping.get(t, t)
         # Build a unique list of CoinGecko ids to batch into a single request

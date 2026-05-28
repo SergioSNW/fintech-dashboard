@@ -14,6 +14,14 @@ class Asset:
             self.name = self.ticker.upper()
 
 @dataclass
+class MarketAsset:
+    name: str
+    ticker: str
+    price: float
+    change_24h: float
+    market_cap: float = 0.0
+
+@dataclass
 class Portfolio:
     total_value: float
     assets: list[Asset]
