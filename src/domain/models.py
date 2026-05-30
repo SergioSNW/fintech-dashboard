@@ -1,17 +1,20 @@
-from dataclasses import dataclass
+# src/domain/models.py
+from dataclasses import dataclass, field
+from typing import List, Optional
 
 @dataclass
 class Asset:
     ticker: str
     amount: float
     asset_type: str
-    price: float = 0.0
-    total_value: float = 0.0
-    name: str = ""
+    name: Optional[str] = None
+    price: Optional[float] = None
+    total_value: Optional[float] = None
 
-    def __post_init__(self):
-        if not self.name:
-            self.name = self.ticker.upper()
+@dataclass
+class Portfolio:
+    total_value: float
+    assets: List[Asset] = field(default_factory=list)
 
 @dataclass
 class MarketAsset:
@@ -19,9 +22,5 @@ class MarketAsset:
     ticker: str
     price: float
     change_24h: float
-    market_cap: float = 0.0
-
-@dataclass
-class Portfolio:
-    total_value: float
-    assets: list[Asset]
+    # NEW: Field to store the array of float prices for rendering the sparkline
+    sparkline_prices: List[float] = field(default_factory=list)
