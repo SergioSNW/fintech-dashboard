@@ -1,8 +1,9 @@
 # src/ui/main_window.py
 
+import asyncio
 from PySide6.QtCore import Qt, QDateTime, QTimer, QPoint, QEvent
 from PySide6.QtGui import QColor, QPainter, QPen, QPainterPath, QAction
-from PySide6.QtCharts import QChart, QChartView, QPieSeries
+from PySide6.QtCharts import QChart, QChartView, QPieSeries, QLineSeries, QDateTimeAxis, QValueAxis
 from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
@@ -19,6 +20,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QMenu,
     QListView,
+    QAbstractItemView,
     QFrame
 )
 from src.domain.models import Portfolio
@@ -95,9 +97,24 @@ class MainWindow(QMainWindow):
         self.cooldown_remaining = 0
         self.portfolio_reference = None
         
+        # Memory caching system to actively save CoinGecko standard API limits
+        self.chart_cache = {}
+        self.active_chart_ticker = None
+
         self.current_currency_symbol = "$"
         self.currency_rates = {"USD": 1.0, "EUR": 0.92, "GBP": 0.79}
         self.active_currency_key = "USD"
+
+        # Explicit name mapping utility to translate raw tickers to premium names
+        self.asset_name_map = {
+            "BTC": "Bitcoin",
+            "ETH": "Ethereum",
+            "SOL": "Solana",
+            "ADA": "Cardano",
+            "DOT": "Polkadot",
+            "XRP": "Ripple",
+            "LINK": "Chainlink"
+        }
 
         self.cooldown_timer = QTimer(self)
         self.cooldown_timer.setInterval(1000)
@@ -149,15 +166,19 @@ class MainWindow(QMainWindow):
         self.currency_dropdown.setObjectName("CurrencyDropdown")
         self.currency_dropdown.addItems(["USD ($)", "EUR (€)", "GBP (£)"])
         self.currency_dropdown.setCursor(Qt.PointingHandCursor)
-        self.currency_dropdown.setMaxVisibleItems(5)
+        self.currency_dropdown.setMaxVisibleItems(8)
+        self.currency_dropdown.setEditable(False)
+        self.currency_dropdown.setStyleSheet("QComboBox#CurrencyDropdown { padding-right: 28px; }")
         
-        # Hard platform overrides to prevent native frame leaks
         currency_view = QListView()
+        currency_view.setObjectName("CurrencyDropdownPopup")
         currency_view.is_light_theme = self.is_light_theme
         currency_view.setWindowFlags(Qt.Popup | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint)
-        currency_view.setAttribute(Qt.WA_TranslucentBackground)
         currency_view.setFrameShape(QFrame.NoFrame)
+        currency_view.setFrameShadow(QFrame.Plain)
+        currency_view.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         currency_view.setItemDelegate(DropdownItemDelegate(currency_view))
+        currency_view.setStyleSheet("QListView#CurrencyDropdownPopup { background: transparent; border: none; }")
         self.currency_dropdown.setView(currency_view)
         
         self.currency_dropdown.currentTextChanged.connect(self._on_currency_changed)
@@ -195,10 +216,11 @@ class MainWindow(QMainWindow):
         summary_layout.addWidget(self.total_value_label)
         summary_layout.addWidget(self.last_update_label)
 
-        self.asset_table = QTableWidget(0, 6)
+        # 5 Columns layout: Asset, Amount Held, Live Price, Total Value, Actions
+        self.asset_table = QTableWidget(0, 5)
         self.asset_table.setObjectName("AssetTable")
         self.asset_table.setHorizontalHeaderLabels(
-            ["Asset Name", "Ticker", "Amount Held", "Live Price", "Total Value", "Actions"]
+            ["Asset", "Amount Held", "Live Price", "Total Value", "Actions"]
         )
         self.asset_table.verticalHeader().setVisible(False)
         self.asset_table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -206,27 +228,57 @@ class MainWindow(QMainWindow):
         self.asset_table.setAlternatingRowColors(True)
         self.asset_table.setFocusPolicy(Qt.NoFocus)
         self.asset_table.setShowGrid(False)
-        
         self.asset_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.asset_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
+        self.asset_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        
+        # Consistent layout padding height supporting custom rows safely
+        self.asset_table.verticalHeader().setDefaultSectionSize(48)
+        self.asset_table.cellClicked.connect(self._on_asset_row_clicked)
 
+        # Bottom Graphic Allocation and Trend Layout Switcher
+        self.chart_container = QWidget()
+        chart_container_layout = QHBoxLayout(self.chart_container)
+        chart_container_layout.setContentsMargins(0, 0, 0, 0)
+        chart_container_layout.setSpacing(14)
+
+        # Left Column: Pie Composition Graph
+        pie_wrapper = QWidget()
+        pie_layout = QVBoxLayout(pie_wrapper)
+        pie_layout.setContentsMargins(0, 0, 0, 0)
         self.chart_title = QLabel("Portfolio Allocation")
         self.chart_title.setObjectName("ChartTitle")
-
         self.allocation_chart = QChart()
         self.allocation_chart.setBackgroundVisible(False)
         self.allocation_chart.legend().setVisible(True)
         self.allocation_chart.legend().setAlignment(Qt.AlignBottom)
-
         self.chart_view = QChartView(self.allocation_chart)
         self.chart_view.setRenderHint(QPainter.Antialiasing)
         self.chart_view.setObjectName("AllocationChart")
         self.chart_view.setMinimumHeight(280)
+        pie_layout.addWidget(self.chart_title)
+        pie_layout.addWidget(self.chart_view)
+
+        # Right Column: Historical Interactive Trend Graph Layer
+        trend_wrapper = QWidget()
+        trend_layout = QVBoxLayout(trend_wrapper)
+        trend_layout.setContentsMargins(0, 0, 0, 0)
+        self.trend_title = QLabel("Market Analytics (7-Day History)")
+        self.trend_title.setObjectName("ChartTitle")
+        self.historical_chart = QChart()
+        self.historical_chart.setBackgroundVisible(False)
+        self.historical_chart_view = QChartView(self.historical_chart)
+        self.historical_chart_view.setRenderHint(QPainter.Antialiasing)
+        self.historical_chart_view.setObjectName("AllocationChart")
+        self.historical_chart_view.setMinimumHeight(280)
+        trend_layout.addWidget(self.trend_title)
+        trend_layout.addWidget(self.historical_chart_view)
+
+        chart_container_layout.addWidget(pie_wrapper, 1)
+        chart_container_layout.addWidget(trend_wrapper, 1)
 
         left_layout.addLayout(summary_layout)
         left_layout.addWidget(self.asset_table)
-        left_layout.addWidget(self.chart_title)
-        left_layout.addWidget(self.chart_view)
+        left_layout.addWidget(self.chart_container)
 
         self.right_panel = QWidget()
         self.right_panel.setObjectName("RightPanel")
@@ -248,11 +300,12 @@ class MainWindow(QMainWindow):
         self.market_table.setAlternatingRowColors(True)
         self.market_table.setFocusPolicy(Qt.NoFocus)
         self.market_table.setShowGrid(False)
-        
         self.market_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.market_table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.market_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.market_table.verticalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        
+        self.market_table.cellClicked.connect(self._on_market_row_clicked)
         
         self.sparkline_delegate = SparklineDelegate(self)
         self.market_table.setItemDelegateForColumn(4, self.sparkline_delegate)
@@ -277,6 +330,9 @@ class MainWindow(QMainWindow):
 
         self.add_asset_button.clicked.connect(self.open_add_asset_dialog)
         self.refresh_button.clicked.connect(self.on_refresh_clicked)
+        
+        # Placeholder text on initialization
+        self._set_historical_chart_message("Select any row asset to generate historical metrics")
 
     def eventFilter(self, watched, event):
         if watched == self.top_header and event.type() == QEvent.MouseButtonPress:
@@ -294,6 +350,8 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(self._build_stylesheet())
         if self.portfolio_reference:
             self.setPortfolio(self.portfolio_reference)
+        if self.active_chart_ticker:
+            self.update_historical_trend_chart(self.active_chart_ticker, self.chart_cache.get(self.active_chart_ticker, []))
 
     def _build_stylesheet(self) -> str:
         if self.is_light_theme:
@@ -311,15 +369,9 @@ class MainWindow(QMainWindow):
                 color: #334155; border-radius: 12px; padding: 12px 20px; font-size: 13px; font-weight: 700; min-width: 140px;
             }
             QPushButton#RefreshButton:hover, QPushButton#AddAssetButton:hover { background-color: #e2e8f0; }
-            
-            QPushButton#ThemeToggleButton {
-                background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 12px; font-size: 16px; padding: 0px;
-            }
+            QPushButton#ThemeToggleButton { background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 12px; font-size: 16px; padding: 0px; }
             QPushButton#ThemeToggleButton:hover { background-color: #e2e8f0; }
-            
-            QPushButton#RowActionButton {
-                background-color: transparent; border: none; color: #64748b; font-size: 16px; font-weight: 800; padding: 2px;
-            }
+            QPushButton#RowActionButton { background-color: transparent; border: none; color: #64748b; font-size: 16px; font-weight: 800; padding: 2px; }
             QPushButton#RowActionButton:hover { color: #2563eb; }
             
             QComboBox#CurrencyDropdown {
@@ -327,13 +379,14 @@ class MainWindow(QMainWindow):
                 border: 1px solid #cbd5e1; color: #334155; border-radius: 12px; 
                 padding: 10px 14px; font-size: 13px; font-weight: 700; min-width: 110px;
             }
-            QComboBox#CurrencyDropdown::drop-down { border: none; background: transparent; }
-            
+            QComboBox#CurrencyDropdown::drop-down { width: 28px; subcontrol-origin: padding; subcontrol-position: top right; border-left: 1px solid #cbd5e1; background: transparent; }
+            QComboBox#CurrencyDropdown::down-arrow { image: none; width: 10px; height: 10px; border: none; }
             QComboBox#CurrencyDropdown QAbstractItemView, QComboBox#DialogDropdown QAbstractItemView { 
                 font-family: 'Segoe UI', sans-serif; font-size: 13px; font-weight: 700;
-                background-color: #ffffff; border: 1px solid #cbd5e1; border-radius: 8px;
-                color: #0f172a; outline: none;
+                background-color: #ffffff; border: none; border-radius: 8px; color: #0f172a; outline: none; margin: 0; padding: 4px 0; max-height: 220px;
             }
+            QListView#CurrencyDropdownPopup { background: transparent; border: none; }
+            QComboBox#CurrencyDropdown QAbstractItemView::item:selected { background-color: #e2e8f0; color: #0f172a; }
 
             QPushButton#WindowControlButton, QPushButton#CloseButton { background-color: transparent; border: none; color: #64748b; font-size: 14px; }
             #LeftPanel, #RightPanel { background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 16px; }
@@ -360,29 +413,23 @@ class MainWindow(QMainWindow):
                 color: #f8fafc; border-radius: 12px; padding: 12px 20px; font-size: 13px; font-weight: 700; min-width: 140px;
             }
             QPushButton#RefreshButton:hover, QPushButton#AddAssetButton:hover { background-color: rgba(255, 255, 255, 0.12); }
-            
-            QPushButton#ThemeToggleButton {
-                background-color: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 12px; font-size: 16px; padding: 0px;
-            }
+            QPushButton#ThemeToggleButton { background-color: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 12px; font-size: 16px; padding: 0px; }
             QPushButton#ThemeToggleButton:hover { background-color: rgba(255, 255, 255, 0.12); }
-            
-            QPushButton#RowActionButton {
-                background-color: transparent; border: none; color: #a0a0a5; font-size: 16px; font-weight: 800; padding: 2px;
-            }
+            QPushButton#RowActionButton { background-color: transparent; border: none; color: #a0a0a5; font-size: 16px; font-weight: 800; padding: 2px; }
             QPushButton#RowActionButton:hover { color: #00ff8c; }
             
             QComboBox#CurrencyDropdown {
                 font-family: 'Segoe UI', sans-serif; background-color: rgba(255, 255, 255, 0.08); 
-                border: 1px solid rgba(255, 255, 255, 0.12); color: #f8fafc; border-radius: 12px; 
-                padding: 10px 14px; font-size: 13px; font-weight: 700; min-width: 110px;
+                border: 1px solid rgba(255, 255, 255, 0.12); color: #f8fafc; border-radius: 12px; padding: 10px 14px; font-size: 13px; font-weight: 700; min-width: 110px;
             }
-            QComboBox#CurrencyDropdown::drop-down { border: none; background: transparent; }
-            
+            QComboBox#CurrencyDropdown::drop-down { width: 28px; subcontrol-origin: padding; subcontrol-position: top right; border-left: 1px solid rgba(255, 255, 255, 0.12); background: transparent; }
+            QComboBox#CurrencyDropdown::down-arrow { image: none; width: 10px; height: 10px; border: none; }
             QComboBox#CurrencyDropdown QAbstractItemView, QComboBox#DialogDropdown QAbstractItemView { 
                 font-family: 'Segoe UI', sans-serif; font-size: 13px; font-weight: 700;
-                background-color: #1a1a22; border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 8px;
-                color: #f8fafc; outline: none;
+                background-color: #1a1a22; border: none; border-radius: 8px; color: #f8fafc; outline: none; margin: 0; padding: 4px 0; max-height: 220px;
             }
+            QListView#CurrencyDropdownPopup { background: transparent; border: none; }
+            QComboBox#CurrencyDropdown QAbstractItemView::item:selected { background-color: #2d2d38; color: #00ff8c; }
 
             QPushButton#WindowControlButton, QPushButton#CloseButton { background-color: transparent; border: none; color: #a0a0a5; font-size: 14px; }
             #LeftPanel, #RightPanel { background-color: #1a1a22; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 16px; }
@@ -408,6 +455,8 @@ class MainWindow(QMainWindow):
             
         if self.portfolio_reference:
             self.setPortfolio(self.portfolio_reference)
+        if self.active_chart_ticker:
+            self.update_historical_trend_chart(self.active_chart_ticker, self.chart_cache.get(self.active_chart_ticker, []))
 
     def setLastUpdateText(self, text: str):
         self.last_update_label.setText(text)
@@ -433,8 +482,10 @@ class MainWindow(QMainWindow):
         self.asset_table.setRowCount(len(portfolio.assets))
         
         for row, asset in enumerate(portfolio.assets):
-            name = asset.name or asset.ticker
-            ticker = asset.ticker
+            ticker = asset.ticker.strip().upper()
+            
+            # Resolve premium display name mapping safely
+            resolved_name = asset.name or self.asset_name_map.get(ticker, ticker.capitalize())
             amount_text = f"{asset.amount:,.4f}" if isinstance(asset.amount, float) else str(asset.amount)
             
             raw_price = getattr(asset, 'price', None)
@@ -443,12 +494,42 @@ class MainWindow(QMainWindow):
             price_text = f"{self.current_currency_symbol}{(raw_price * rate):,.2f}" if raw_price is not None else "--"
             total_text = f"{self.current_currency_symbol}{(raw_total * rate):,.2f}" if raw_total is not None else "--"
 
-            cells = [name, ticker, amount_text, price_text, total_text]
-            for col, value in enumerate(cells):
+            # 1. FIXED: SIDE-BY-SIDE LAYOUT
+            container = QWidget()
+            cell_layout = QHBoxLayout(container)
+            cell_layout.setContentsMargins(12, 0, 12, 0)
+            cell_layout.setSpacing(8)
+            cell_layout.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
+            
+            name_label = QLabel(resolved_name)
+            ticker_label = QLabel(f"({ticker})")
+            
+            if self.is_light_theme:
+                name_label.setStyleSheet("font-weight: 700; font-size: 13px; color: #0f172a; background: transparent;")
+                ticker_label.setStyleSheet("font-size: 12px; color: #64748b; font-weight: 600; background: transparent;")
+            else:
+                name_label.setStyleSheet("font-weight: 700; font-size: 13px; color: #ffffff; background: transparent;")
+                ticker_label.setStyleSheet("font-size: 12px; color: #a0a0a5; font-weight: 600; background: transparent;")
+                
+            cell_layout.addWidget(name_label)
+            cell_layout.addWidget(ticker_label)
+            
+            # Bind tracking ticker data dynamically to the container to bypass background painter bugs
+            container.ticker_id = ticker
+            self.asset_table.setCellWidget(row, 0, container)
+
+            # CRITICAL: Keep underlying row item completely blank to avoid double text overlay leaks!
+            blank_item = QTableWidgetItem()
+            blank_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            self.asset_table.setItem(row, 0, blank_item)
+
+            # 2. POPULATE CONVERTED DATA COLUMNS
+            cells = [amount_text, price_text, total_text]
+            for col_idx, value in enumerate(cells, start=1):
                 item = QTableWidgetItem(value)
                 item.setTextAlignment(Qt.AlignVCenter | Qt.AlignLeft)
                 item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-                self.asset_table.setItem(row, col, item)
+                self.asset_table.setItem(row, col_idx, item)
 
             action_btn = QPushButton("•••")
             action_btn.setObjectName("RowActionButton")
@@ -456,7 +537,7 @@ class MainWindow(QMainWindow):
             action_btn.setFixedSize(40, 28)
             
             action_btn.clicked.connect(lambda checked=False, t=ticker, a=asset.amount: self._show_row_context_menu(t, a))
-            self.asset_table.setCellWidget(row, 5, action_btn)
+            self.asset_table.setCellWidget(row, 4, action_btn)
 
         self.asset_table.setUpdatesEnabled(True)
         self.update_allocation_chart(portfolio)
@@ -565,6 +646,147 @@ class MainWindow(QMainWindow):
         self.allocation_chart.legend().setVisible(True)
         self.allocation_chart.legend().setLabelColor(QColor("#334155") if self.is_light_theme else QColor("#ffffff"))
 
+    # ==========================================
+    # GRAPH CONTROLLER & FIXED HIT PIPELINE
+    # ==========================================
+    def _on_asset_row_clicked(self, row, col):
+        if col == 4:  
+            return
+        
+        # FIXED: Pull metadata binding from column widget container safely
+        cell_widget = self.asset_table.cellWidget(row, 0)
+        if cell_widget and hasattr(cell_widget, 'ticker_id'):
+            self.dispatch_historical_trend_request(cell_widget.ticker_id)
+
+    def _on_market_row_clicked(self, row, col):
+        ticker_item = self.market_table.item(row, 1)
+        if ticker_item:
+            self.dispatch_historical_trend_request(ticker_item.text())
+
+    def dispatch_historical_trend_request(self, ticker: str):
+        ticker = ticker.strip().upper()
+        self.active_chart_ticker = ticker
+        
+        self.trend_title.setText(f"Market Analytics ({ticker} 7-Day History) — in {self.active_currency_key}")
+
+        if ticker in self.chart_cache:
+            self.update_historical_trend_chart(ticker, self.chart_cache[ticker])
+            return
+
+        self._set_historical_chart_message(f"Fetching historical metrics for {ticker}...")
+        
+        coin_id_map = {"BTC": "bitcoin", "ETH": "ethereum", "SOL": "solana", "ADA": "cardano", "DOT": "polkadot", "XRP": "ripple", "LINK": "chainlink"}
+        coin_id = coin_id_map.get(ticker, ticker.lower())
+
+        asyncio.create_task(self._async_fetch_historical_data(ticker, coin_id))
+
+    async def _async_fetch_historical_data(self, ticker: str, coin_id: str):
+        try:
+            from src.infrastructure.api_client import APIClient
+            client = APIClient()
+            url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart?vs_currency=usd&days=7"
+            
+            payload = await client.fetch_data(url)
+            if payload and "prices" in payload:
+                raw_prices = payload["prices"]
+                self.chart_cache[ticker] = raw_prices
+                
+                if self.active_chart_ticker == ticker:
+                    self.update_historical_trend_chart(ticker, raw_prices)
+            else:
+                self._set_historical_chart_message("Error: Received invalid data matrix structural formats")
+        except Exception as e:
+            if "429" in str(e):
+                self._set_historical_chart_message("Rate Limit Reached. Please select again in a minute.")
+            else:
+                self._set_historical_chart_message("Historical trendline metrics currently unavailable")
+
+    def update_historical_trend_chart(self, ticker: str, raw_api_prices: list):
+        self.historical_chart.removeAllSeries()
+        
+        if not raw_api_prices or len(raw_api_prices) < 2:
+            self._set_historical_chart_message("Insufficient historical records found.")
+            return
+
+        self.trend_title.setText(f"Market Analytics ({ticker} 7-Day History) — in {self.active_currency_key}")
+
+        series = QLineSeries()
+        rate = self.currency_rates[self.active_currency_key]
+        
+        min_time = float('inf')
+        max_time = float('-inf')
+        min_price = float('inf')
+        max_price = float('-inf')
+        
+        for item in raw_api_prices:
+            timestamp = item[0] 
+            converted_price = item[1] * rate
+            
+            series.append(timestamp, converted_price)
+            
+            if timestamp < min_time: min_time = timestamp
+            if timestamp > max_time: max_time = timestamp
+            if converted_price < min_price: min_price = converted_price
+            if converted_price > max_price: max_price = converted_price
+
+        start_p = raw_api_prices[0][1]
+        end_p = raw_api_prices[-1][1]
+        
+        if end_p >= start_p:
+            line_color = QColor("#00c853") if self.is_light_theme else QColor("#00ff8c")
+        else:
+            line_color = QColor("#ea580c") if self.is_light_theme else QColor("#ef4444")
+
+        pen = QPen(line_color, 3, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+        series.setPen(pen)
+        self.historical_chart.addSeries(series)
+
+        for axis in self.historical_chart.axes():
+            self.historical_chart.removeAxis(axis)
+
+        axis_x = QDateTimeAxis()
+        axis_x.setFormat("MM/dd")
+        axis_x.setLabelsColor(QColor("#334155") if self.is_light_theme else QColor("#cbd5e1"))
+        axis_x.setRange(QDateTime.fromMSecsSinceEpoch(int(min_time)), QDateTime.fromMSecsSinceEpoch(int(max_time)))
+        axis_x.setTickCount(4)
+        axis_x.setGridLineVisible(False)
+        self.historical_chart.addAxis(axis_x, Qt.AlignBottom)
+        series.attachAxis(axis_x)
+
+        axis_y = QValueAxis()
+        padding = (max_price - min_price) * 0.15 if max_price != min_price else 1.0
+        axis_y.setRange(min_price - padding, max_price + padding)
+        axis_y.setLabelsColor(QColor("#334155") if self.is_light_theme else QColor("#cbd5e1"))
+        axis_y.setLabelFormat("%.2f")
+        axis_y.setTickCount(5)
+        axis_y.setGridLineColor(QColor("rgba(0,0,0,0.05)") if self.is_light_theme else QColor("rgba(255,255,255,0.05)"))
+        
+        font = axis_y.labelsFont()
+        font.setFamily("Segoe UI")
+        axis_y.setLabelsFont(font)
+        
+        self.historical_chart.addAxis(axis_y, Qt.AlignLeft)
+        series.attachAxis(axis_y)
+
+    def _set_historical_chart_message(self, message: str):
+        self.historical_chart.removeAllSeries()
+        for axis in self.historical_chart.axes():
+            self.historical_chart.removeAxis(axis)
+        
+        axis_x = QValueAxis()
+        axis_x.setRange(0, 10)
+        axis_x.setVisible(False)
+        axis_y = QValueAxis()
+        axis_y.setRange(0, 10)
+        axis_y.setVisible(False)
+        
+        self.historical_chart.addAxis(axis_x, Qt.AlignBottom)
+        self.historical_chart.addAxis(axis_y, Qt.AlignLeft)
+        
+        self.historical_chart.setTitle(message)
+        self.historical_chart.setTitleBrush(QColor("#64748b") if self.is_light_theme else QColor("#a0a0a5"))
+    # ==========================================
+
     def setMarketData(self, market_assets):
         self.market_table.setUpdatesEnabled(False)
         self.market_table.setRowCount(len(market_assets))
@@ -620,8 +842,18 @@ class MainWindow(QMainWindow):
         dialog = AddAssetDialog(self, is_light_theme=self.is_light_theme)
         if dialog.exec() == QDialog.Accepted:
             ticker, amount = dialog.get_data()
-            if ticker and amount > 0.0 and self.asset_added_callback:
-                self.asset_added_callback(ticker, amount)
+            print(f"[DEBUG] Dialog accepted. Ticker: '{ticker}', Amount: {amount}")
+            print(f"[DEBUG] Has callback? {self.asset_added_callback is not None}")
+
+            if ticker and amount > 0.0:
+                if self.asset_added_callback:
+                    self.asset_added_callback(ticker, amount)
+                    print(f"[DEBUG] Callback fired successfully for {ticker}")
+                    self.setPortfolio(self.portfolio_reference)
+                else:
+                    print("[WARNING] Asset data was valid, but self.asset_added_callback is None!")
+            else:
+                print(f"[WARNING] Insertion rejected because ticker was empty or amount ({amount}) <= 0.0")
 
     def setRefreshEnabled(self, enabled: bool):
         self.refresh_button.setEnabled(enabled)

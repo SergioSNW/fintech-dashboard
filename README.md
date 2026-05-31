@@ -1,69 +1,75 @@
 # Fintech Dashboard
 
-## Setup
+A desktop crypto portfolio tracking dashboard built with Python, PySide6, and asyncio.
+
+This portfolio piece demonstrates a clean architecture for a desktop application with live market data, local persistence, responsive UI, and custom styled Qt widgets.
+
+## Key Features
+
+- Add, edit, and delete crypto assets in a portfolio
+- Real-time portfolio valuation with currency toggle support for USD, EUR, and GBP
+- Market analytics for selected crypto assets and live global market data
+- Asset allocation visualization with responsive charting
+- Background refresh pipeline using async I/O and a non-blocking UI loop
+- Local persistence with SQLite via `src/infrastructure/portfolio_repository.py`
+- Custom themed PySide6 dropdowns and modal dialogs for polished desktop UX
+
+## Architecture
+
+- `src/domain/models.py` — domain models for `Portfolio` and `Asset`
+- `src/infrastructure/api_client.py` — market data client and HTTP integration
+- `src/infrastructure/portfolio_repository.py` — persistent portfolio storage
+- `src/use_cases/` — business logic for fetching market data and updating portfolio values
+- `src/ui/main_window.py` — main desktop window and portfolio presentation layer
+- `src/ui/components/add_asset_dialog.py` — add asset modal with styled dropdowns and validation
+- `src/ui/workers/` — asynchronous worker components for background sync
+
+## Run locally
 
 1. Clone the repository:
+
    ```sh
    git clone https://github.com/yourusername/fintech-dashboard.git
    cd fintech-dashboard
    ```
 
-2. Create a virtual environment (optional but recommended):
+2. Create and activate a virtual environment:
+
    ```sh
    python -m venv venv
-   source venv/bin/activate  # On Windows use `venv\Scripts\activate`
+   venv\Scripts\activate
    ```
 
 3. Install dependencies:
+
    ```sh
    pip install -r requirements.txt
    ```
 
-4. Run the application:
+4. Start the desktop app:
    ```sh
-   docker-compose up --build
+   python main.py
    ```
 
-## Architecture
+## Testing
 
-The project follows a clean architecture using Python.
+Run the unit tests with:
 
-- **app/config.py**: Configuration management.
-- **app/service/dashboard_service.py**: Business logic.
-- **app/data/repository.py**: Data persistence.
-- **app/api/routes.py**: Expose endpoints.
+```sh
+pytest
 ```
 
-### Step 8: Monitor and Log
-Implement logging using `logging` or `structlog`.
+## Notes for Employers
 
-```python
-# app/utils/helpers.py
-import logging
+- This project showcases clean separation of concerns between UI, business logic, and infrastructure
+- The UI is built with PySide6 and custom Qt styling for a modern desktop experience
+- Async and background refresh behavior is implemented using `qasync` and `aiohttp`
+- The project includes a local SQLite persistence layer for saving portfolio assets
+- The main entrypoint is `main.py`
 
-logger = logging.getLogger(__name__)
+## Recommended Python environment
 
-def log_error(message):
-    logger.error(message)
-```
+- Python 3.10+ or 3.11+
+- `PySide6`, `qasync`, `aiohttp`, `pandas`, `requests`
 
-Set up a basic logging configuration in your main application file.
-
-```python
-# app/api/routes.py
-from flask import Flask, jsonify
-from app.service.dashboard_service import DashboardService
-from app.data.repository import DashboardRepository
-import logging
-
-app = Flask(__name__)
-repository = DashboardRepository()
-service = DashboardService(repository)
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-@app.route('/dashboard', methods=['GET'])
-def get_dashboard():
-    data = service.get_dashboard_data()
-    return jsonify([{'id': item.id, 'name': item.name, 'value': item.value} for item in data])
+> Note: The Docker configuration file is present in the repository, but the primary local startup path for this app is the desktop entrypoint `python main.py`.

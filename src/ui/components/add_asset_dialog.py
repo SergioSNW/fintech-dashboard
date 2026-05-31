@@ -14,7 +14,8 @@ from PySide6.QtWidgets import (
     QListView,
     QStyledItemDelegate,
     QStyle,
-    QFrame
+    QAbstractItemView,
+    QCompleter
 )
 
 class DropdownItemDelegate(QStyledItemDelegate):
@@ -23,7 +24,13 @@ class DropdownItemDelegate(QStyledItemDelegate):
 
     def paint(self, painter, option, index):
         painter.save()
-        is_light = getattr(self.parent(), "is_light_theme", False)
+        # Safe resolution handling for light vs dark theme selection styling
+        combo_view = self.parent()
+        is_light = getattr(combo_view, "is_light_theme", False)
+        if combo_view and combo_view.parentWidget():
+            # Check the actual parent dialog properties or popup view properties
+            dialog = combo_view.window()
+            is_light = getattr(dialog, "is_light_theme", is_light)
         
         if option.state & QStyle.State_Selected:
             bg_color = QColor("#e2e8f0") if is_light else QColor("#2d2d38")
@@ -37,7 +44,7 @@ class DropdownItemDelegate(QStyledItemDelegate):
         
         text = index.data(Qt.DisplayRole)
         text_rect = option.rect.adjusted(12, 0, 0, 0)
-        painter.drawText(text_rect, Qt.AlignVCenter | Qt.AlignLeft, text)
+        painter.drawText(text_rect, Qt.AlignVCenter | Qt.AlignLeft, str(text) if text else "")
         painter.restore()
 
 
@@ -47,7 +54,8 @@ class AddAssetDialog(QDialog):
         self.is_light_theme = is_light_theme
         self.setWindowTitle("Add Asset")
         
-        self.setWindowFlags(Qt.Popup | Qt.FramelessWindowHint)
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self.setWindowModality(Qt.ApplicationModal)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setFixedSize(380, 260)
 
@@ -79,23 +87,42 @@ class AddAssetDialog(QDialog):
         form_layout = QVBoxLayout()
         form_layout.setSpacing(12)
 
-        self.ticker_label = QLabel("Select Crypto Asset:")
+        self.ticker_label = QLabel("Search Crypto Asset:")
         self.ticker_label.setObjectName("FieldLabel")
         
         self.ticker_dropdown = QComboBox()
         self.ticker_dropdown.setObjectName("DialogDropdown")
         self.ticker_dropdown.setCursor(Qt.PointingHandCursor)
-        self.ticker_dropdown.addItems(["BTC", "ETH", "SOL", "ADA", "DOT", "XRP", "LINK"])
-        self.ticker_dropdown.setMaxVisibleItems(10)
+        self.ticker_dropdown.setView(QListView())
+        self.ticker_dropdown.setMaxVisibleItems(8)
+        self.ticker_dropdown.setInsertPolicy(QComboBox.NoInsert)
+        self.ticker_dropdown.setEditable(True)
         
-        # Hard platform overrides to prevent native frame leaks
-        dropdown_view = QListView()
-        dropdown_view.is_light_theme = self.is_light_theme  
-        dropdown_view.setWindowFlags(Qt.Popup | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint)
-        dropdown_view.setAttribute(Qt.WA_TranslucentBackground)
-        dropdown_view.setFrameShape(QFrame.NoFrame)
-        dropdown_view.setItemDelegate(DropdownItemDelegate(dropdown_view))
-        self.ticker_dropdown.setView(dropdown_view)
+        crypto_catalog = [
+            "AAVE", "ADA", "ALGO", "ARB", "ATOM", "AVAX", "BTC", "DOGE", "DOT", "ETH", 
+            "FET", "FIL", "GRT", "HBAR", "ICP", "IMX", "LINK", "LTC", "MATIC", "NEAR", 
+            "OP", "RNDR", "SHIB", "SOL", "STX", "SUI", "UNI", "VET", "XLM", "XRP"
+        ]
+
+        self.ticker_dropdown.addItems(crypto_catalog)
+        btc_index = self.ticker_dropdown.findText("BTC", Qt.MatchExactly)
+        if btc_index >= 0:
+            self.ticker_dropdown.setCurrentIndex(btc_index)
+        self.ticker_dropdown.setCurrentText("BTC")
+        if self.ticker_dropdown.lineEdit():
+            self.ticker_dropdown.lineEdit().setPlaceholderText("BTC")
+            self.ticker_dropdown.lineEdit().setClearButtonEnabled(True)
+
+        # Setup autocomplete search parameters cleanly
+        self.completer = QCompleter(crypto_catalog, self)
+        self.completer.setCompletionMode(QCompleter.PopupCompletion)
+        self.completer.setFilterMode(Qt.MatchContains)
+        self.completer.setCaseSensitivity(Qt.CaseInsensitive)
+        self.ticker_dropdown.setCompleter(self.completer)
+        self.completer.activated.connect(self._on_completer_activated)
+
+        self.ticker_dropdown.view().setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        self.ticker_dropdown.view().setItemDelegate(DropdownItemDelegate(self.ticker_dropdown.view()))
 
         self.amount_label = QLabel("Amount Held:")
         self.amount_label.setObjectName("FieldLabel")
@@ -103,7 +130,8 @@ class AddAssetDialog(QDialog):
         self.amount_input = QDoubleSpinBox()
         self.amount_input.setObjectName("DialogInput")
         self.amount_input.setDecimals(4)
-        self.amount_input.setRange(0.0, 10000000.0)
+        self.amount_input.setRange(0.0001, 10000000.0)
+        self.amount_input.setValue(1.0) 
 
         form_layout.addWidget(self.ticker_label)
         form_layout.addWidget(self.ticker_dropdown)
@@ -142,21 +170,23 @@ class AddAssetDialog(QDialog):
                 #DialogTitle { font-size: 16px; font-weight: 700; color: #0f172a; }
                 #FieldLabel { font-size: 12px; font-weight: 600; color: #64748b; margin-bottom: -2px; }
                 
-                QDoubleSpinBox#DialogInput, QComboBox#DialogDropdown {
+                QDoubleSpinBox#DialogInput, QComboBox#DialogDropdown, QComboBox#DialogDropdown QLineEdit {
                     font-family: 'Segoe UI', sans-serif; background-color: #f8fafc;
-                    border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 12px; color: #0f172a; font-size: 13px; font-weight: 600;
+                    border: 1px solid #cbd5e1; border-radius: 8px; color: #0f172a; font-size: 13px; font-weight: 600;
                 }
-                QComboBox#DialogDropdown::drop-down { border: none; background: transparent; }
+                QComboBox#DialogDropdown { padding: 4px 6px; min-height: 36px; }
+                QComboBox#DialogDropdown QLineEdit { border: none; padding: 0px; background: transparent; }
+                QComboBox#DialogDropdown::drop-down { width: 28px; subcontrol-origin: padding; subcontrol-position: top right; border-left: 1px solid #cbd5e1; }
+                QComboBox#DialogDropdown::down-arrow { image: none; width: 10px; height: 10px; border: none; }
                 
                 QComboBox#DialogDropdown QAbstractItemView { 
-                    font-family: 'Segoe UI', sans-serif; font-size: 13px; font-weight: 600;
                     background-color: #ffffff; border: 1px solid #cbd5e1; border-radius: 8px;
-                    color: #0f172a; outline: none;
+                    color: #0f172a; outline: none; max-height: 220px;
                 }
+                QComboBox#DialogDropdown QAbstractItemView::item:selected { background-color: #e2e8f0; color: #0f172a; }
                 
-                QDoubleSpinBox#DialogInput::up-button, QDoubleSpinBox#DialogInput::down-button {
-                    background: transparent; border: none; width: 20px;
-                }
+                QDoubleSpinBox#DialogInput { padding: 8px 12px; }
+                QDoubleSpinBox#DialogInput::up-button, QDoubleSpinBox#DialogInput::down-button { background: transparent; border: none; width: 20px; }
                 QDoubleSpinBox#DialogInput::up-button { subcontrol-origin: border; subcontrol-position: top right; margin-right: 4px; margin-top: 2px; }
                 QDoubleSpinBox#DialogInput::down-button { subcontrol-origin: border; subcontrol-position: bottom right; margin-right: 4px; margin-bottom: 2px; }
                 
@@ -176,21 +206,23 @@ class AddAssetDialog(QDialog):
                 #DialogTitle { font-size: 16px; font-weight: 700; color: #ffffff; }
                 #FieldLabel { font-size: 12px; font-weight: 600; color: #a0a0a5; margin-bottom: -2px; }
                 
-                QDoubleSpinBox#DialogInput, QComboBox#DialogDropdown {
+                QDoubleSpinBox#DialogInput, QComboBox#DialogDropdown, QComboBox#DialogDropdown QLineEdit {
                     font-family: 'Segoe UI', sans-serif; background-color: #1a1a22;
-                    border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 8px; padding: 8px 12px; color: #ffffff; font-size: 13px; font-weight: 600;
+                    border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 8px; color: #ffffff; font-size: 13px; font-weight: 600;
                 }
-                QComboBox#DialogDropdown::drop-down { border: none; background: transparent; }
+                QComboBox#DialogDropdown { padding: 4px 6px; min-height: 36px; }
+                QComboBox#DialogDropdown QLineEdit { border: none; padding: 0px; background: transparent; }
+                QComboBox#DialogDropdown::drop-down { width: 28px; subcontrol-origin: padding; subcontrol-position: top right; border-left: 1px solid rgba(255, 255, 255, 0.12); }
+                QComboBox#DialogDropdown::down-arrow { image: none; width: 10px; height: 10px; border: none; }
                 
                 QComboBox#DialogDropdown QAbstractItemView { 
-                    font-family: 'Segoe UI', sans-serif; font-size: 13px; font-weight: 600;
                     background-color: #1a1a22; border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 8px;
-                    color: #f8fafc; outline: none;
+                    color: #f8fafc; outline: none; max-height: 220px;
                 }
+                QComboBox#DialogDropdown QAbstractItemView::item:selected { background-color: #2d2d38; color: #00ff8c; }
                 
-                QDoubleSpinBox#DialogInput::up-button, QDoubleSpinBox#DialogInput::down-button {
-                    background: transparent; border: none; width: 20px;
-                }
+                QDoubleSpinBox#DialogInput { padding: 8px 12px; }
+                QDoubleSpinBox#DialogInput::up-button, QDoubleSpinBox#DialogInput::down-button { background: transparent; border: none; width: 20px; }
                 QDoubleSpinBox#DialogInput::up-button { subcontrol-origin: border; subcontrol-position: top right; margin-right: 4px; margin-top: 2px; }
                 QDoubleSpinBox#DialogInput::down-button { subcontrol-origin: border; subcontrol-position: bottom right; margin-right: 4px; margin-bottom: 2px; }
                 
@@ -204,13 +236,19 @@ class AddAssetDialog(QDialog):
                 QPushButton#DialogCloseButton:hover { color: #ef4444; }
             """
 
-    def event(self, event):
-        if event.type() == QEvent.WindowDeactivate:
-            if self.ticker_dropdown.view() and self.ticker_dropdown.view().isVisible():
-                return super().event(event)
-            self.reject()
-            return True
-        return super().event(event)
+    def _on_completer_activated(self, text: str):
+        if text:
+            self.ticker_dropdown.setCurrentText(text)
+
+    def accept(self):
+        # FIXED: Handle dynamic current text lookup safely
+        ticker = self.ticker_dropdown.currentText().strip()
+        if not ticker:
+            return
+        super().accept()
 
     def get_data(self):
-        return self.ticker_dropdown.currentText(), self.amount_input.value()
+        # FIXED: Removed trailing syntax comments causing compile breaks.
+        # Fallback cleanly to currentText validation.
+        ticker_text = self.ticker_dropdown.currentText().strip().upper()
+        return ticker_text, self.amount_input.value()
