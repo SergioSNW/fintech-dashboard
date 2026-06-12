@@ -2,29 +2,71 @@ You are an expert Principal Python Engineer specializing in high-performance des
 
 Folder Structure.
 fintech-dashboard/
-├── app/
-│   ├── __init__.py
-│   ├── config.py
-│   ├── service/
-│   │   ├── __init__.py
-│   │   ├── dashboard_service.py
-│   ├── data/
-│   │   ├── __init__.py
-│   │   ├── repository.py
-│   ├── api/
-│   │   ├── __init__.py
-│   │   ├── routes.py
-├── utils/
-│   ├── __init__.py
-│   ├── helpers.py
-├── tests/
-│   ├── __init__.py
-│   ├── test_service/
-│   │   ├── __init__.py
-│   │   ├── test_dashboard_service.py
+├── .env
+├── .env.example
+├── .git/
+├── .github/
 ├── .gitignore
+├── Dockerfile
+├── README.md
+├── __pycache__/
+├── docker-compose.yaml
+├── fintech-dashboard-intro.md
+├── fintech_dashboard_architecture.md
+├── main.py
+├── masterplan.md
+├── notes.md
+├── portfolio.db
 ├── requirements.txt
-└── README.md
+├── setup.py
+├── venv/
+├── src/
+│   ├── __pycache__/
+│   ├── __version__.py
+│   ├── config.py
+│   ├── domain/
+│   │   ├── __init__.py
+│   │   ├── __pycache__/
+│   │   └── models.py
+│   ├── infrastructure/
+│   │   ├── __init__.py
+│   │   ├── __pycache__/
+│   │   ├── api_client.py
+│   │   ├── portfolio_repository.py
+│   │   └── repositories.py
+│   ├── services/
+│   │   ├── __init__.py
+│   │   └── api_service.py
+│   ├── ui/
+│   │   ├── __init__.py
+│   │   ├── __pycache__/
+│   │   ├── main_window.py
+│   │   ├── workers.py
+│   │   ├── components/
+│   │   │   ├── __init__.py
+│   │   │   ├── __pycache__/
+│   │   │   ├── add_asset_dialog.py
+│   │   │   └── edit_asset_dialog.py
+│   │   ├── signals/
+│   │   │   └── __init__.py
+│   │   └── workers/
+│   │       ├── __init__.py
+│   │       ├── __pycache__/
+│   │       ├── global_market_worker.py
+│   │       └── update_portfolio_worker.py
+│   └── use_cases/
+│       ├── __init__.py
+│       ├── __pycache__/
+│       ├── fetch_global_market_data.py
+│       ├── fetch_market_data.py
+│       └── update_portfolio.py
+└── tests/
+    ├── __init__.py
+    ├── __pycache__/
+    ├── test_api_client.py
+    ├── test_domain.py
+    ├── test_use_cases.py
+    └── test_workers.py
 
 OBJECTIVES:
 1. Workspace Initialization: Verify the workspace root directory and ensure a Python virtual environment can be mapped correctly.
